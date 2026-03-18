@@ -654,33 +654,69 @@ window.addEventListener("DOMContentLoaded", async () => {
     hide("loading"); show("fb-setup"); return;
   }
   if (!initFirebase(cfg)) {
+    localStorage.removeItem("fb_config");
     hide("loading"); show("fb-setup"); return;
   }
 
-  // Load users
-  const usersSnap = await db.ref("users").get();
-  if (usersSnap.exists()) {
-    users = usersSnap.val();
-  } else {
-    users = DEFAULT_USERS;
-    db.ref("users").set(users);
+  // Timeout: se demorar mais de 8s, mostra erro útil
+  const timeout = setTimeout(() => {
+    hide("loading");
+    document.body.innerHTML = `
+      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f8fafc;padding:20px;font-family:system-ui">
+        <div style="background:#fff;border-radius:20px;padding:28px;max-width:400px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.1);text-align:center">
+          <div style="font-size:40px;margin-bottom:12px">⚠️</div>
+          <h2 style="font-size:18px;font-weight:700;margin-bottom:8px">Erro de conexão</h2>
+          <p style="font-size:14px;color:#64748b;margin-bottom:20px">Não foi possível conectar ao banco de dados. Verifique sua internet ou reconfigure o Firebase.</p>
+          <button onclick="localStorage.removeItem('fb_config');location.reload()" style="width:100%;padding:12px;border-radius:12px;background:#6366f1;color:#fff;font-weight:700;font-size:14px;border:none;cursor:pointer">🔄 Reconfigurar</button>
+        </div>
+      </div>`;
+  }, 8000);
+
+  try {
+    // Load users
+    const usersSnap = await db.ref("users").get();
+    if (usersSnap.exists()) {
+      users = usersSnap.val();
+    } else {
+      users = DEFAULT_USERS;
+      await db.ref("users").set(users);
+    }
+
+    clearTimeout(timeout);
+
+    // Listen to expenses
+    db.ref("expenses").on("value", snap => {
+      expenses = snap.val() || {};
+      if (currentUser) renderCurrentTab();
+    });
+
+    // Check session
+    const sess = sessionStorage.getItem("fc_user");
+    if (sess) {
+      try {
+        const u = JSON.parse(sess);
+        if (users[u.username]) { currentUser = {...u,...users[u.username]}; bootApp(); return; }
+      } catch(e) { sessionStorage.removeItem("fc_user"); }
+    }
+
+    hide("loading"); show("login-screen");
+    populateForm();
+
+  } catch(e) {
+    clearTimeout(timeout);
+    console.error("Firebase error:", e);
+    hide("loading");
+    document.body.innerHTML = `
+      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f8fafc;padding:20px;font-family:system-ui">
+        <div style="background:#fff;border-radius:20px;padding:28px;max-width:400px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.1);text-align:center">
+          <div style="font-size:40px;margin-bottom:12px">⚠️</div>
+          <h2 style="font-size:18px;font-weight:700;margin-bottom:8px">Erro de conexão</h2>
+          <p style="font-size:14px;color:#64748b;margin-bottom:8px">Não foi possível conectar ao Firebase.</p>
+          <p style="font-size:12px;color:#94a3b8;margin-bottom:20px;word-break:break-all">${e.message||"Erro desconhecido"}</p>
+          <button onclick="localStorage.removeItem('fb_config');location.reload()" style="width:100%;padding:12px;border-radius:12px;background:#6366f1;color:#fff;font-weight:700;font-size:14px;border:none;cursor:pointer">🔄 Reconfigurar</button>
+        </div>
+      </div>`;
   }
-
-  // Listen to expenses
-  db.ref("expenses").on("value", snap => {
-    expenses = snap.val() || {};
-    if (currentUser) renderCurrentTab();
-  });
-
-  // Check session
-  const sess = sessionStorage.getItem("fc_user");
-  if (sess) {
-    const u = JSON.parse(sess);
-    if (users[u.username]) { currentUser = {...u,...users[u.username]}; bootApp(); return; }
-  }
-
-  hide("loading"); show("login-screen");
-  populateForm();
 });
 
 function bootApp() {
